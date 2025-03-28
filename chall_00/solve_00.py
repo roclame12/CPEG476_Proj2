@@ -1,4 +1,5 @@
 from templates import buff_overflow
+import pwn
 
 
 def main():
@@ -6,7 +7,7 @@ def main():
 
     buff_overflow(
         payload,
-        elf = "./pwnme0",
+        pwn.process("./pwnme0"),
         interactive = False
     )
 

@@ -1,4 +1,5 @@
 from templates import buff_overflow, get_func_addr
+import pwn
 
 
 def main():
@@ -6,7 +7,7 @@ def main():
 
     buff_overflow(
         payload,
-        elf = "./pwnme2",
+        pwn.process("./pwnme2"),
         interactive = False,
         preserve_payload=True
     )

@@ -42,7 +42,12 @@ def get_func_addr(elf: str,
 
 
 def did_shell_spawn(pid: str) -> bool:
-    # when a shell doesn't spawn, there's essentially a race condition where Python might not get execution back before
+    # check if the process itself became a shell
+    if "sh" in subprocess.run(["ps", pid], capture_output=True, text=True).stdout:
+        return True
+
+    # Check to see if there's a child process spawned that's a shell
+    # when a shell doesn't spawn, there's a race condition where Python might not get execution back before
     # the process closes, so the proc entry will be gone before this function starts up, thus the try...except block
     try:
         with open(f"/proc/{pid}/task/{pid}/children", "r") as file:
@@ -62,14 +67,14 @@ def did_shell_spawn(pid: str) -> bool:
 
 
 def buff_overflow(payload: bytes,
-                  elf: str = "./a.out",
+                  proc: pwn.process,
                   interactive: bool = True,
                   preserve_payload: bool = False) -> bool | None:
     """
     Executes a buffer overflow by making a file and then redirecting it to the program's STDIN
 
     :param payload: the bytes payload to be sent to the program
-    :param elf: the path to the ELF executable (defaults to ./a.out)
+    :param proc: The process to exploit
     :param interactive: whether to give control to the user once the exploit is complete (defaults to True)
     :param preserve_payload: Whether the payload file should be preserved (defaults to False)
 
@@ -79,16 +84,15 @@ def buff_overflow(payload: bytes,
         with open("payload_file", "wb") as file:
             file.write(payload)
 
-    proc = pwn.process(elf)
     proc.sendline(payload)
     if interactive:
         proc.interactive()
 
     # attempt to encode stdout into ascii, (exploit weirdness might make this not work)
     try:
-        stdout = str(proc.recv(), encoding="ascii")
+        stdout = str(proc.recv(timeout=1), encoding="ascii")
     except subprocess.CalledProcessError:
-        stdout = proc.recv()
+        stdout = proc.recv(timeout=1)
 
     print(
         "\n\n--------------------------- STDOUT ---------------------------\n"
@@ -96,7 +100,7 @@ def buff_overflow(payload: bytes,
         "\n------------------------- END STDOUT -------------------------\n"
         )
 
-    is_pwned = did_shell_spawn(proc.pid)
+    is_pwned = did_shell_spawn(str(proc.pid))
     proc.close()
 
     if is_pwned:
