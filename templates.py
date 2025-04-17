@@ -9,6 +9,13 @@ import pwn
 import sys
 
 
+def line2addr(line: str) -> int:
+    line = line.split()[0]  # get rid of everything but the address
+    line = line[:-1]  # get rid of the colon at the end
+
+    return int(line, 16)
+
+
 def get_func_addr(elf: str,
                   func_name: str = "win",
                   skip_amt: int = 0,
@@ -23,22 +30,64 @@ def get_func_addr(elf: str,
 
     :return: the little-endian address of the function (or the instruction of the function that was skipped to)
     """
-
     # disassemble and then get <skip_amt> instructions
     out = subprocess.run(f"objdump -d {elf} | grep -A {skip_amt + 1} \"<{func_name}>:\"",
                          shell=True, capture_output=True, text=True).stdout
-
     out = out.split("\n")[skip_amt + 1]  # get rid of everything but the wanted instruction
-    out = out.split()[0]  # get rid of everything but the address
-    out = out[:-1]  # get rid of the colon at the end
+    addr = line2addr(out)
 
-    addr: bytes
     if bits == 32:
-        addr = pwn.p32(int(out, 16))
+        return pwn.p32(addr)
     else:
-        addr = pwn.p64(int(out, 16))
+        return pwn.p64(addr)
 
-    return addr
+
+def get_addr_from_leak(
+        elf: str,
+        leak_addr: str,
+        leak_name: str = "vuln",
+        func_name: str = "win",
+        skip_amt: int = 0,
+        bits: Literal[32, 64] = 64) -> bytes:
+    """
+    Finds an address of a function within a PIE enabled binary.
+
+    :param elf: name of the binary
+    :param leak_addr: the address of a function leak in the binary
+    :param leak_name: the name of the leaked function (defaults to "vuln")
+    :param func_name: the name of the function to find (defaults to "win")
+    :param skip_amt: the amount of instructions in the function to skip (defaults to 0)
+    :param bits: whether the returned address should be a 64-bit or 32-bit address (defaults to 64)
+
+    :return: the little-endian address of the function (or the instruction of the function that was skipped to)
+    """
+    out = subprocess.run(f"objdump -d {elf}", shell=True, capture_output=True, text=True).stdout.split("\n")
+    lines = [None, None]  # lines[0] is for the leak_address line, lines[1] is for func_address
+    for i in range(len(out)):
+        line = out[i]
+        if leak_name in line:
+            lines[0] = (i + 1)
+        elif func_name in line:
+            lines[1] = (i + 1)
+
+        if None not in lines:  # both lines with the function addresses have been found, loop should be exited
+            break
+
+    # null checking to ensure that both functions actually exist within the binary
+    if lines[0] is None:
+        raise ValueError(f"get_addr_from_leak: function {leak_name} not found in binary. Aborting")
+    if lines[1] is None:
+        raise ValueError(f"get_addr_from_leak: function {func_name} not found in binary. Aborting")
+
+    # get the base from the leak, then get the desired function address from the base
+    start = int(leak_addr, 16) - line2addr(out[lines[0]])
+    addr = start + line2addr(out[lines[1] + skip_amt])
+
+    # return the address in the desired size
+    if bits == 32:
+        return pwn.p32(addr)
+    else:
+        return pwn.p64(addr)
 
 
 def did_shell_spawn(pid: str) -> bool:
@@ -56,6 +105,7 @@ def did_shell_spawn(pid: str) -> bool:
         print("is_shell_spawned: process closed before function could launch, shell probably didn't spawn", file=sys.stderr)
         return False
 
+    # run through all the children to see if one of them is sh
     spawned = False
     for child in children:
         ps_out = subprocess.run(["ps", child], capture_output=True, text=True).stdout

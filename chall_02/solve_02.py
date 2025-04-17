@@ -9,7 +9,6 @@ def main():
         payload,
         pwn.process("./pwnme2"),
         interactive = False,
-        preserve_payload=True
     )
 
 
