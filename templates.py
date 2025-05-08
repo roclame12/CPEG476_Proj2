@@ -7,6 +7,7 @@ import subprocess
 from typing import Literal
 import pwn
 import sys
+import re
 
 
 def line2addr(line: str) -> int:
@@ -159,3 +160,33 @@ def buff_overflow(payload: bytes,
         print("Exploit was NOT successful")
 
     return is_pwned
+
+
+def ideal_gadget(path: str, instruction: str) -> int:
+    """
+    Attempts to find a "perfect" ROP gadget for an instruction (a gadget where the instruction is executed and a ret is
+    triggered). Rasies an exception if no gadget is found.
+
+    :param path: path to the binary to search
+    :param instruction: the instruction to search for
+
+    :return: the offset/address of the perfect gadget
+    """
+    out = subprocess.run(
+        ["ROPgadget", "--binary", path, "--depth", "3"],
+        capture_output=True,
+        text=True).stdout
+
+    match = re.search("(0x[0-9a-f]{16}|0x[0-9a-f]{8}) : pop rsi ; ret$", out, re.MULTILINE)
+
+    if match is None:
+        raise ValueError(f"ideal_gadget: could not find instruction {instruction} in binary {path}")
+    else:
+        return int(match.group(1), 16)
+
+
+def str_to_addr(addr: str, bits: Literal[32, 64] = 64) -> bytes:
+    if bits == 32:
+        return pwn.p32(int(addr, 16))
+    else:
+        return pwn.p64(int(addr, 16))
